@@ -1,6 +1,11 @@
 import express, { Request, Response } from 'express'
 import * as oauthClient from 'openid-client'
-import cookieSession from 'cookie-session'
+import session from 'express-session'
+declare module 'express-session' {
+  interface SessionData {
+    pkceCodeVerifier?: any;
+  }
+}
 import { env } from './env'
 
 const app = express()
@@ -9,14 +14,17 @@ const port = 3000
 const secretKeys = [ env.secretKey ]
 const maxAge = 24 * 60 * 60 * 1000 // 24 hours
 
-app.use(cookieSession({
-  name: 'session',
-  keys: secretKeys,
-  maxAge,
+app.use(session({
+  saveUninitialized: false,
+  resave: false,
+  secret: secretKeys,
+  cookie: {
+    maxAge,
+  }
 }))
 
 const serverMetadata: oauthClient.ServerMetadata = {
-  issuer: 'gh', // I don't know what should go here
+  issuer: 'gh', // I don't know what should go here but it doesn't seem to matter
   authorization_endpoint: 'https://github.com/login/oauth/authorize',
   token_endpoint: 'https://github.com/login/oauth/access_token',
 }
@@ -46,6 +54,7 @@ app.get('/callback', async (req, res) => {
     pkceCodeVerifier: req.session.pkceCodeVerifier,
   })
   res.send('Token Endpoint Response: ' + JSON.stringify(tokens))
+  tokens.access_token
 })
 
 app.listen(port, () => {
