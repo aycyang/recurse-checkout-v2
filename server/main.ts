@@ -1,9 +1,12 @@
 import express, { Request, Response } from 'express'
+import path from 'node:path'
 import * as oauthClient from 'openid-client'
 import session from 'express-session'
 declare module 'express-session' {
   interface SessionData {
-    pkceCodeVerifier?: any;
+    pkceCodeVerifier?: any
+    tokens
+    username
   }
 }
 import { env } from './env'
@@ -36,6 +39,30 @@ const config: oauthClient.Configuration = new oauthClient.Configuration(
 
 app.use(express.static('public'))
 
+app.get('/', (req, res) => {
+  if (req.session && req.session.tokens) {
+    res.sendFile(path.resolve('client/authenticated.html'))
+  } else {
+    res.sendFile(path.resolve('client/unauthenticated.html'))
+  }
+})
+
+app.get('/get_commits', async (req, res) => {
+  if (!req.session || !req.session.tokens) {
+    console.error('get_commits: no session')
+    return
+  }
+  const url = new URL('https://api.github.com/search/commits')
+  url.searchParams.set('q', `author:${req.session.username} committer-date:>${req.query.startDate.toString()}`)
+  const commitsRes = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${req.session.tokens.access_token}`,
+    }
+  })
+  const commits = await commitsRes.json()
+  res.json(commits)
+})
+
 app.get('/login', async (req: Request, res: Response) => {
   req.session.pkceCodeVerifier = oauthClient.randomPKCECodeVerifier()
   const code_challenge = await oauthClient.calculatePKCECodeChallenge(req.session.pkceCodeVerifier)
@@ -53,8 +80,15 @@ app.get('/callback', async (req, res) => {
   let tokens = await oauthClient.authorizationCodeGrant(config, currentUrl, {
     pkceCodeVerifier: req.session.pkceCodeVerifier,
   })
-  res.send('Token Endpoint Response: ' + JSON.stringify(tokens))
-  tokens.access_token
+  req.session.tokens = tokens
+  const userRes = await fetch('https://api.github.com/user', {
+    headers: {
+      'Authorization': `Bearer ${req.session.tokens.access_token}`,
+    }
+  })
+  const user = await userRes.json()
+  req.session.username = user.login
+  res.redirect('/')
 })
 
 app.listen(port, () => {
