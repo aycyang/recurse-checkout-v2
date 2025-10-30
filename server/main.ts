@@ -1,3 +1,4 @@
+import { Octokit } from '@octokit/rest'
 import express, { Request, Response } from 'express'
 import path from 'node:path'
 import * as oauthClient from 'openid-client'
@@ -41,6 +42,7 @@ app.use(express.static('public'))
 
 app.get('/', (req, res) => {
   if (req.session && req.session.tokens) {
+    console.log(req.session.username)
     res.sendFile(path.resolve('client/authenticated.html'))
   } else {
     res.sendFile(path.resolve('client/unauthenticated.html'))
@@ -52,14 +54,12 @@ app.get('/get_commits', async (req, res) => {
     console.error('get_commits: no session')
     return
   }
-  const url = new URL('https://api.github.com/search/commits')
-  url.searchParams.set('q', `author:${req.session.username} committer-date:>${req.query.startDate.toString()}`)
-  const commitsRes = await fetch(url, {
-    headers: {
-      'Authorization': `Bearer ${req.session.tokens.access_token}`,
-    }
+  const octokit = new Octokit({ auth: req.session.tokens.access_token })
+  const commits = await octokit.paginate(octokit.rest.search.commits, {
+    q: `author:${req.session.username} committer-date:>${req.query.startDate.toString()}`,
+    per_page: 100,
   })
-  const commits = await commitsRes.json()
+  // TODO collect unique repositories, then call the repos endpoint
   res.json(commits)
 })
 
@@ -81,13 +81,9 @@ app.get('/callback', async (req, res) => {
     pkceCodeVerifier: req.session.pkceCodeVerifier,
   })
   req.session.tokens = tokens
-  const userRes = await fetch('https://api.github.com/user', {
-    headers: {
-      'Authorization': `Bearer ${req.session.tokens.access_token}`,
-    }
-  })
-  const user = await userRes.json()
-  req.session.username = user.login
+  const octokit = new Octokit({ auth: tokens.access_token })
+  const userRes = await octokit.rest.users.getAuthenticated()
+  req.session.username = userRes.data.login
   res.redirect('/')
 })
 
